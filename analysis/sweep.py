@@ -27,10 +27,8 @@ from backtest_runner import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# Use parquet_files/ if available (full dataset), otherwise sample_data/
-_full_data = PROJECT_ROOT / "parquet_files"
-_sample_data = PROJECT_ROOT / "sample_data"
-PARQUET_DIR = _full_data if _full_data.exists() else _sample_data
+# Default to sample_data/; use --data-dir to override
+PARQUET_DIR = PROJECT_ROOT / "sample_data"
 TOKEN_CACHE_PATH = PROJECT_ROOT / "analysis" / "token_cache.json"
 RESULTS_PATH = PROJECT_ROOT / "results.tsv"
 BACKTEST_BIN = PROJECT_ROOT / "target" / "release" / "backtest"
@@ -98,6 +96,7 @@ def run_single(
     window_id: str,
     up_token: str,
     down_token: str,
+    date: str,
     strategy_params: dict[str, object],
     run_id: int,
     cleanup: bool,
@@ -143,14 +142,12 @@ def run_single(
     volume = summary.get("volume", 0.0)
     bps_per_dollar = 0.0
 
-    if fills_path.exists():
+    if date and fills_path.exists():
         fills_df = pl.read_parquet(fills_path)
-        # Load features for PnL computation
-        date = token_cache_global.get(window_id, {}).get("date", "")
-        if date:
+        if fills_df.height > 0:
             data = load_window_data(PARQUET_DIR, date, window_id)
             features_df = data.get("features_df")
-            if features_df is not None and fills_df.height > 0:
+            if features_df is not None:
                 pnl_result = compute_pnl(fills_df, features_df, up_token, down_token, 50, 100.0)
                 pnl_value = pnl_result.pnl
                 if volume > 0:
@@ -158,7 +155,7 @@ def run_single(
 
     row: dict[str, object] = {
         "window_id": window_id,
-        "date": token_cache_global.get(window_id, {}).get("date", ""),
+        "date": date,
         "run_id": run_id,
         **{k: v for k, v in strategy_params.items() if k not in FIXED_PARAMS},
         "fills": summary.get("fills", 0),
@@ -189,7 +186,12 @@ def main() -> None:
     parser.add_argument("--parallel", type=int, default=4, help="Parallel workers")
     parser.add_argument("--cleanup", action="store_true", help="Delete parquet output after metrics")
     parser.add_argument("--rebuild-cache", action="store_true", help="Force rebuild token cache")
+    parser.add_argument("--data-dir", type=str, help="Data directory (default: sample_data)")
     args = parser.parse_args()
+
+    global PARQUET_DIR
+    if args.data_dir:
+        PARQUET_DIR = PROJECT_ROOT / args.data_dir
 
     if args.rebuild_cache and TOKEN_CACHE_PATH.exists():
         TOKEN_CACHE_PATH.unlink()
@@ -225,7 +227,7 @@ def main() -> None:
         for window_id in window_ids:
             info = token_cache[window_id]
             for run_id, params in enumerate(param_combos):
-                row = run_single(window_id, info["up"], info["down"], params, run_id, args.cleanup)
+                row = run_single(window_id, info["up"], info["down"], info.get("date", ""), params, run_id, args.cleanup)
                 if row:
                     results.append(row)
                 completed += 1
@@ -238,7 +240,7 @@ def main() -> None:
                 info = token_cache[window_id]
                 for run_id, params in enumerate(param_combos):
                     fut = executor.submit(
-                        run_single, window_id, info["up"], info["down"], params, run_id, args.cleanup
+                        run_single, window_id, info["up"], info["down"], info.get("date", ""), params, run_id, args.cleanup
                     )
                     futures[fut] = (window_id, run_id)
 
