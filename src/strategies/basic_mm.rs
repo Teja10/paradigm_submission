@@ -25,6 +25,12 @@ pub struct BasicMmConfig {
     pub invariant_buffer: Decimal,
     pub enforce_parity: bool,
 
+    // === Fair-value quoting ===
+    /// Offset from fair value in ticks for bid/ask placement.
+    /// 0 = quote at fair, 1 = 1 tick outside fair, -1 = 1 tick inside fair.
+    /// None/disabled when not set (uses TOB quoting).
+    pub fair_value_offset: Option<i32>,
+
     // === Momentum filter ===
     /// Pull quotes when position_direction * delta_microprice_5s < threshold
     /// Default: -8.0
@@ -48,6 +54,7 @@ impl Default for BasicMmConfig {
             neg_risk: false,
             invariant_buffer: dec!(0.01),
             enforce_parity: true,
+            fair_value_offset: None,
             momentum_threshold: -8.0,
             momentum_threshold_tight: -5.0,
             vol_ratio_threshold: 1.3,
@@ -67,6 +74,10 @@ pub struct BasicMarketMaker {
     sigma_dyn: f64,
     /// Cached sigma_5m (5-min window) for vol ratio calculation
     sigma_5m: f64,
+    /// Cached fair value for UP token
+    fair_up: f64,
+    /// Cached fair value for DOWN token
+    fair_down: f64,
 }
 
 impl BasicMarketMaker {
@@ -83,6 +94,8 @@ impl BasicMarketMaker {
             delta_microprice_5s: 0.0,
             sigma_dyn: 0.0,
             sigma_5m: 1.0, // Default to 1.0 to avoid div by zero
+            fair_up: 0.0,
+            fair_down: 0.0,
         }
     }
 
@@ -136,6 +149,29 @@ impl BasicMarketMaker {
         }
 
         true
+    }
+
+    /// Compute bid/ask prices from fair value + offset.
+    /// Returns (bid_price, ask_price) for a given fair value.
+    fn fair_value_prices(&self, fair: f64) -> (Option<Decimal>, Option<Decimal>) {
+        let tick = self.config.tick_size;
+        let offset = self.config.fair_value_offset.unwrap_or(0);
+        let offset_dec = tick * Decimal::from(offset);
+
+        // Convert fair to Decimal, round to tick grid
+        let fair_dec = Decimal::from_f64_retain(fair).unwrap_or(Decimal::ZERO);
+        // Bid: round down to tick, then subtract offset
+        let bid_ticks = (fair_dec / tick).floor();
+        let bid = bid_ticks * tick - offset_dec;
+        // Ask: round up to tick, then add offset
+        let ask_ticks = (fair_dec / tick).ceil();
+        let ask = ask_ticks * tick + offset_dec;
+
+        let min_price = dec!(0.01);
+        let max_price = dec!(0.99);
+        let bid = if bid >= min_price && bid <= max_price { Some(bid) } else { None };
+        let ask = if ask >= min_price && ask <= max_price { Some(ask) } else { None };
+        (bid, ask)
     }
 
     fn manage_side(
@@ -267,8 +303,16 @@ impl BasicMarketMaker {
         let up_token_id = &up_book.token_id;
         let down_token_id = &down_book.token_id;
 
-        let (up_best_bid, up_best_ask) = Self::best_bid_ask(up_book);
-        let (down_best_bid, down_best_ask) = Self::best_bid_ask(down_book);
+        let (up_best_bid, up_best_ask) = if self.config.fair_value_offset.is_some() {
+            self.fair_value_prices(self.fair_up)
+        } else {
+            Self::best_bid_ask(up_book)
+        };
+        let (down_best_bid, down_best_ask) = if self.config.fair_value_offset.is_some() {
+            self.fair_value_prices(self.fair_down)
+        } else {
+            Self::best_bid_ask(down_book)
+        };
 
         let available_up = snapshot
             .position
@@ -492,12 +536,16 @@ impl Strategy for BasicMarketMaker {
                 down_book,
                 delta_microprice_5s,
                 volatility_features,
+                fair_up,
+                fair_down,
                 ..
             } => {
-                // Update cached momentum and volatility features
+                // Update cached features
                 self.delta_microprice_5s = delta_microprice_5s.unwrap_or(0.0);
                 self.sigma_dyn = volatility_features.sigma_dyn;
                 self.sigma_5m = volatility_features.sigma_5m;
+                self.fair_up = fair_up;
+                self.fair_down = fair_down;
 
                 self.current_condition_id = Some(condition_id.clone());
                 if self
