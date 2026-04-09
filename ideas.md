@@ -29,7 +29,10 @@
 
 ## In Progress
 
-(none)
+### Fair-value quoting
+**Hypothesis**: Quoting at `fair_up`/`fair_down` instead of TOB should reduce adverse selection — the model's fair value incorporates oracle+coinbase information that pure TOB quoting ignores.
+**Changes**: In `quote_market()`, compute desired price from `fair_up`/`fair_down` (rounded to tick) instead of `best_bid`/`best_ask`. Add `fair_value_offset` config param (ticks to offset from fair). Need to pass fair values into the strategy and cache them.
+**Param grid**: Sweep `fair_value_offset` in [-2, -1, 0, 1, 2] ticks, combined with momentum thresholds.
 
 ## Completed (Kept)
 
