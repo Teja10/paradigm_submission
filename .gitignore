@@ -1,0 +1,14 @@
+/target
+/.venv
+*.env
+backtest_results/
+sweep_config_*.toml
+results.tsv
+analysis/token_cache.json
+run.log
+debug.log
+__pycache__/
+*.pyc
+
+# Full dataset is local-only; sample_data/ is committed
+parquet_files/

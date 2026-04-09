@@ -1,0 +1,22 @@
+# Sample window 1770282000 (2026-02-05)
+window_start = 1770282000
+delta_mode = "absolute"
+queue_added_ahead = false
+latency_min_ms = 50
+latency_max_ms = 100
+seed = 42
+fee_bps = 0
+data_dir = "sample_data"
+output_dir = "backtest_results/1770282000"
+condition_id = "window_1770282000"
+up_token_id = "110900313650481724812254780251997062764497414347467388213037106207369658887685"
+down_token_id = "94517312629092688235315566556726555984824813609127854836478658013910882760471"
+token_filter = ["110900313650481724812254780251997062764497414347467388213037106207369658887685", "94517312629092688235315566556726555984824813609127854836478658013910882760471"]
+initial_complete_sets = 50
+complete_set_price = 1.0
+initial_cash = 100.0
+
+[strategy]
+momentum_threshold = -8.0
+momentum_threshold_tight = -5.0
+vol_ratio_threshold = 1.3

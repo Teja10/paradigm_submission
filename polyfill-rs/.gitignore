@@ -1,0 +1,11 @@
+/external
+/target
+
+# Coverage reports
+tarpaulin-report.html
+*.profraw
+/target/tarpaulin/
+
+# Environment variables (contains secrets)
+.env
+
